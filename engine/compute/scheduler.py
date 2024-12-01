@@ -228,4 +228,46 @@ class Scheduler:
                 self._handle_failed_operation(op)
 
     def _execute_operations(self, operations: List[ScheduledOperation]):
-        pass
+        for op in operations:
+            try:
+                result = op.callback(op.data)
+                self._handle_completed_operation(op, result)
+            except Exception as e:
+                self._handle_failed_operation(op, err=str(e))
+
+    def _handle_completed_operation(self, operation: ScheduledOperation, result: any):
+        with self.operation_lock:
+            if operation.id in self.active_operations:
+                del self.active_operations[operation.id]
+
+    def _handle_failed_operation(self, operation: ScheduledOperation, error: str = ""):
+        with self.operation_lock:
+            if operation.id in self.active_operations:
+                del self.active_operations[operation.id]
+        print(f"Operation {operation.id} failed: {error}")
+
+    def _check_memory_pressure(self):
+        if self.memory_Tracker.should_reduce_batch():
+            self.batch_config.current_max_batch = max(\
+                    1,
+                    self.batch_config.current_max_batch // 2
+            )
+        elif self.memory_tracker.can_increase_batch():
+            self.batch_config.current_max_batch = min(
+                self.batch_config.max_batch_size,
+                self.batch_config.current_max_batch * 2
+            )
+
+    def get_stats(self) -> Dict:
+        return {
+                "active_operations": len(self.active_operations),
+                "high_priority_queue_size": self.high_priority_queue.qsize(),
+                "normal_queue_size": self.normal_queue.qsize(),
+                "current_batch_size": self.batch_config.current_max_batch,
+                "memory_pressure": self.memory_tracker.get_memory_pressure()
+        }
+    
+    def shutdown(self):
+        self.running = False
+        self.scheduler_thread.join()
+        self.workers.shutdown()

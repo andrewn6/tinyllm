@@ -59,14 +59,15 @@ class BlockManager:
             torch.finfo(dtype).bits // 8 * 2
         )
 
-        if self.device_type = DeviceType.CUDA:
+        if self.device_type is DeviceType.CUDA:
             self.setup_cuda()
-        elif self.device_type = DeviceType.MPS:
+        elif self.device_type is DeviceType.MPS:
             self.setup_mps()
         else:
             self.setup_cpu()
 
-        self.free_blocks: List{CacheBlock} = []
+        self.free_blocks: List[CacheBlock] = []
+        " ""Compute attention scores"""
         self.used_blocks: Dict[int, CacheBlock] = {}
         self.block_counter = 0
 
@@ -101,7 +102,7 @@ class BlockManager:
         with ctx:
             try:
                 key_block = torch.empty(
-                        (self.block_size, self.num_heads, self.head_size)
+                        (self.block_size, self.num_heads, self.head_size),
                         dtype=self.dtype,
                         device=self.device
                 )

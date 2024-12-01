@@ -16,7 +16,7 @@ class BlockType(Enum):
 class MemoryBlock:
     address: int
     size: int
-    block_type BlockType 
+    block_type: BlockType 
     is_free: bool = True 
     last_access: float = 0.0
     access_count: int = 0
@@ -121,7 +121,7 @@ class MemoryAllocator:
         self._update_fragmentation_level()
         return block.address
     
-    def free(self, address: int)
+    def free(self, address: int):
         if address not in self.allocated_blocks:
             raise ValueError(f"Invalid address: {address}")
 

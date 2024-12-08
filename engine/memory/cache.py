@@ -28,15 +28,14 @@ def get_best_device() -> torch.device:
         return torch.device("mps")
     return torch.device("cpu")
 
-
 @dataclass 
 class CacheBlock:
-    key_block: torch.Tensor
-    value_block: torch.Tensor
-    block_id: int
-    num_tokens: int
-    start_pos: int
-    last_access: float = 0.0
+     key_block: torch.Tensor
+     value_block: torch.Tensor
+     block_id: int
+     num_tokens: int
+     start_pos: int
+     last_access: float = 0.0
 
 class BlockManager:
     def __init__(
@@ -67,7 +66,6 @@ class BlockManager:
             self.setup_cpu()
 
         self.free_blocks: List[CacheBlock] = []
-        " ""Compute attention scores"""
         self.used_blocks: Dict[int, CacheBlock] = {}
         self.block_counter = 0
 
@@ -89,7 +87,7 @@ class BlockManager:
     
     def allocate_block(self) -> Optional[CacheBlock]:
         if self.device_type == DeviceType.CUDA:
-            if torch.cuda_memory_allocated(self.device) + self.block_size_bytes > self.available_memory * 0.95:
+            if torch.cuda.memory_allocated(self.device) + self.block_size_bytes > self.available_memory * 0.95:
                 torch.cuda.empty_cache()
                 if torch.cuda.memory_allocated(self.device) + self.block_size_bytes > self.available_memory * 0.95:
                     return None 
@@ -225,7 +223,7 @@ class PagedKVCache:
 
             blocks = self.sequence_blocks[seq_id][layer_id]
             start_block = start_idx // self.block_size 
-            end_block = (end_idx + self.block_size  -1) 
+            end_block = (end_idx + self.block_size  -1) // self.block_size
 
             if start_block >= len(blocks) or end_block > len(blocks):
                 self.stats["misses"] += 1 
@@ -239,12 +237,12 @@ class PagedKVCache:
             with ctx:
                 total_tokens = end_idx - start_idx
                 key_cache = torch.empty(
-                    (total_tokens, self.num_heads, self.head_size),
+                    (1, self.num_heads, total_tokens, self.head_size),
                     dtype=self.dtype,
                     device=self.device,
                 )
                 value_cache = torch.empty(
-                    (total_tokens, self.num_heads, self.head_size),
+                    (1, self.num_heads, total_tokens, self.head_size),
                     dtype=self.dtype,
                     device=self.device
                 )
@@ -255,12 +253,12 @@ class PagedKVCache:
                         self.block_size,
                         total_tokens - offset
                     )
-                    key_cache[offset:offset + tokens_to_copy].copy_(
-                        block.key_block[:tokens_to_copy],
+                    key_cache[0, :, offset:offset + tokens_to_copy].copy_(
+                        block.key_block[:tokens_to_copy].transpose(0, 1),  # [seq, heads, dim] -> [heads, seq, dim]
                         non_blocking=self.device_type == DeviceType.CUDA
                     )
-                    value_cache[offset:offset + tokens_to_copy].copy_(
-                        block.value_block[:tokens_to_copy],
+                    value_cache[0, :, offset:offset + tokens_to_copy].copy_(
+                        block.value_block[:tokens_to_copy].transpose(0, 1),  # [seq, heads, dim] -> [heads, seq, dim]
                         non_blocking=self.device_type == DeviceType.CUDA
                     )
                     offset += tokens_to_copy
@@ -301,19 +299,22 @@ class PagedKVCache:
 
         
             with ctx:
+                key_to_store = key.squeeze(0).squeeze(1).transpose(0, 1)
+                value_to_store = value.squeeze(0).squeeze(1).transpose(0, 1)
+            
                 block.key_block[pos_in_block].copy_(
-                    key,
+                    key_to_store,
                     non_blocking=self.device_type == DeviceType.CUDA
                 )
                 block.value_block[pos_in_block].copy_(
-                    value,
+                    value_to_store,
                     non_blocking=self.device_type == DeviceType.CUDA
                 )
                 block.num_tokens = max(block.num_tokens, pos_in_block + 1)
                 block.last_access = time.time()
             
             if self.device_type == DeviceType.CUDA:
-                self.block_managers[0].stream.syncrhonize()
+                self.block_managers[0].stream.synchronize()
     
     def _free_block(self, block: CacheBlock):
         if self.device_type == DeviceType.CUDA:

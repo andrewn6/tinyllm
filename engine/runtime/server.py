@@ -52,6 +52,8 @@ async def lifespan(app: FastAPI):
     yield
     if hasattr(app.state, "generator"):
         del app.state.generator
+        if torch.cuda.is_available():
+            torch.cuda.empty_cach()
 
 
 app = FastAPI(
@@ -72,7 +74,11 @@ app.add_middleware(
 def initialize_generator():
     if not hasattr(app.state, "generator"):
         try:
-            model_config = TransformerConfig()
+            model_config = TransformerConfig(
+                num_layers=8,
+                hidden_size=1024,
+                num_attention_heads=16
+            )
             tokenizer_config = TokenizerConfig()
 
             model = Transformer(model_config)

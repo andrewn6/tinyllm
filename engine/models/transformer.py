@@ -26,6 +26,9 @@ class TransformerLayer(nn.Module):
         super().__init__()
         self.config = config
 
+        self.input_proj = nn.Linear(config.hidden_size, config.hidden_size)
+        self.output_proj = nn.Linear(config.hidden_size, config.hidden_size)
+
         self.input_layernorm = nn.LayerNorm(
                 config.hidden_size,
                 eps=config.layer_norm_epsilon

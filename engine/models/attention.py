@@ -60,11 +60,16 @@ class Attention(nn.Module):
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         batch_size, seq_length, _ = hidden_states.shape
 
+        if batch_size == 0:
+            hidden_states = hidden_states.unsqueeze(0)
+            batch_size = 1
+            if attention_mask is not None:
+                attention_mask = attention_mask.unsqueeze(0)
+
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
-        
-        # Reshape for attention computation
+ 
         query_states = query_states.view(
             batch_size, seq_length, self.num_heads, self.head_dim
         ).transpose(1, 2)
@@ -101,7 +106,7 @@ class Attention(nn.Module):
         if attention_mask is not None:
             attention_mask = attention_mask.view(
                 batch_size, 1, seq_length, kv_seq_len
-            )
+            ).expand(-1, self.num_heads, -1, -1)
 
         attn_output = self.kernel_manager.get_attention_kernel().attention(
                 query_states,

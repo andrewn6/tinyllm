@@ -22,9 +22,9 @@ def get_device_type(device: torch.device) -> DeviceType:
     return DeviceType.CPU
 
 def get_best_device() -> torch.device:
-    if torch.cuda.is_availaible():
+    if torch.cuda.is_available():
         return torch.device("cuda")
-    if torch.backend.mps.is_availaible():
+    if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
 

@@ -12,6 +12,9 @@ TinyLLM streamlines the inference pipeline with minimal overhead, focusing on me
 - Custom tokenizer implmentation for self-developed models
 - Seamless integration with existing LLM frameworks
 - Inference API
+- KV cache implementation
+- Training CLI for development models
+- Byte-level tokenization
 
 *This is very much still an experiment, especially the tokenizer, our scheduler is somewhat well-written, memory management is decent.*
 
@@ -19,6 +22,6 @@ I'll continue to slowly improve these components over my weekends.
 
 ## Scope
 This is solely a inference engine. It does not:
-- Implement model architectures
-- Provide training capabilities
+- Implement large model architectures
 - Include pre-trained models
+- Support distributed training

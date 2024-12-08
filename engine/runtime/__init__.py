@@ -1,1 +1,7 @@
-# Empty file to make the directory a Python package 
+"""
+Runtime server for TinyLLM
+"""
+
+from .server import app
+
+__all__ = ['app']

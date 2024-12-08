@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from ..models.transformer import Transformer, TransformerConfig
 from ..pipeline.tokenizer import Tokenizer, TokenizerConfig
 from ..pipeline.generator import TextGenerator, GenerationConfig
+from ..registry.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
 metrics = PrometheusMetrics(PrometheusConfig())
@@ -78,6 +79,13 @@ def initialize_generator():
         try:
             model_type = os.getenv("MODEL_TYPE", "native")
             model_name = os.getenv("MODEL_NAME", "default")
+            model_version = os.getenv("MODEL_VERSION")
+            
+            registry = ModelRegistry()
+            model_info = registry.get_model(model_name, version=model_version)
+            
+            if not model_info:
+                raise ValueError(f"Model {model_name} not found")
 
             if model_type == "ollama":
                 app.state.generator = OllamaAdapter(
@@ -87,29 +95,23 @@ def initialize_generator():
                 logger.info(f"Initialized Ollama model: {model_name}")
                 return
             
-            hidden_size = 1024  
-            num_heads = 16
+            # Load model from registry
+            model_config = TransformerConfig(**model_info.config)
+            model = Transformer(model_config)
             
-            model_config = TransformerConfig(
-                num_layers=8,
-                hidden_size=hidden_size,
-                num_attention_heads=num_heads,
-                max_sequence_length=2048,
-                vocab_size=32000,
-                dropout=0.1,
-                layer_norm_epsilon=1e-5,
-                use_cache=True
-            )
+            if model_info.checkpoint_path:
+                state_dict = torch.load(
+                    model_info.checkpoint_path, 
+                    map_location=app.state.device
+                )
+                model.load_state_dict(state_dict)
+            
+            model.to(app.state.device)
             
             tokenizer_config = TokenizerConfig(
                 vocab_size=model_config.vocab_size,
                 max_sequence_length=model_config.max_sequence_length
             )
-
-            model = Transformer(model_config)
-            if app.state.device.type == "cuda":
-                torch.cuda.empty_cache()
-            model.to(app.state.device)
             tokenizer = Tokenizer(tokenizer_config)
 
             app.state.generator = TextGenerator(
@@ -117,10 +119,11 @@ def initialize_generator():
                 tokenizer=tokenizer,
                 device=app.state.device
             )
-            logger.info("Generator initialized successfully")
+            logger.info(f"Initialized {model_type} model: {model_name}")
+            
         except Exception as e:
             logger.error(f"Failed to initialize generator: {e}")
-            raise HTTPException(status_code=500, detail="Failed to initialize model")
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():

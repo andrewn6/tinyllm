@@ -10,8 +10,7 @@ class PrometheusConfig:
 class PrometheusMetrics:
     def __init__(self, config: Optional[PrometheusConfig] = None):
         self.config = config or PrometheusConfig()
-        
-        # Simple request metrics
+    
         self.requests_total = Counter(
             'tinyllm_requests_total',
             'Total number of requests',

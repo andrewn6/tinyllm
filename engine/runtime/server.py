@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+import os
+from ..ollama.adapter import OllamaAdapter
 import torch
 import time
 import logging
@@ -74,6 +76,17 @@ app.add_middleware(
 def initialize_generator():
     if not hasattr(app.state, "generator"):
         try:
+            model_type = os.getenv("MODEL_TYPE", "native")
+            model_name = os.getenv("MODEL_NAME", "default")
+
+            if model_type == "ollama":
+                app.state.generator = OllamaAdapter(
+                    model_name,
+                    device=app.state.device
+                )
+                logger.info(f"Initialized Ollama model: {model_name}")
+                return
+            
             hidden_size = 1024  
             num_heads = 16
             

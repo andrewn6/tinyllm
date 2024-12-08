@@ -7,7 +7,7 @@ from engine.memory.cache import PagedKVCache
 
 @dataclass
 class AttentionConfig:
-    num_heads: int = 32 
+    num_heads: int = 16
     head_dim: int = 64
     dropout: float = 0.1
     max_seq_length: int = 2048

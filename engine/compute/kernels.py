@@ -9,7 +9,7 @@ class KernelConfig:
     dtype: torch.dtype = torch.float16
     max_context_length: int = 2048
     head_size: int = 64
-    num_heads: int = 32
+    num_heads: int = 16
 
 def get_optimal_device():
     if torch.cuda.is_available():

@@ -26,6 +26,8 @@ class TransformerLayer(nn.Module):
         super().__init__()
         self.config = config
 
+        head_dim = config.hidden_size // config.num_attention_heads
+
         self.input_proj = nn.Linear(config.hidden_size, config.hidden_size)
         self.output_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
@@ -41,7 +43,7 @@ class TransformerLayer(nn.Module):
 
         attention_config = AttentionConfig(
                 num_heads=config.num_attention_heads,
-                head_dim=config.hidden_size // config.num_attention_heads,
+                head_dim=head_dim,
                 dropout=config.dropout,
                 max_seq_length=config.max_sequence_length,
                 use_kv_cache=config.use_cache

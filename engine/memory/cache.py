@@ -131,10 +131,10 @@ class PagedKVCache:
     def __init__(
         self,
         num_layers: int,
-        num_heads: int,
-        head_size: int,
+        num_heads: int = 16,
+        head_size: int = 64,
         block_size: int = 16,
-        max_seq_len: int = 8192,
+        max_seq_len: int = 2048,
         dtype: torch.dtype = torch.float16,
         device: Optional[torch.device] = None
     ):

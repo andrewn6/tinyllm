@@ -2,7 +2,7 @@ import time
 import os
 import mmap
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set
 from dataclasses import dataclass
 from enum import Enum
 
@@ -177,7 +177,7 @@ class MemoryAllocator:
                 current_address += block.size
 
         if current_address < self.total_size:
-            new_block.append(MemoryBlock(
+            new_blocks.append(MemoryBlock(
                 address=current_address,
                 size=self.total_size - current_address,
                 block_type=BlockType.TEMPORARY
@@ -199,7 +199,7 @@ class MemoryAllocator:
 
     def _update_fragmentation_level(self):
         total_free = sum(b.size for b in self.blocks if b.is_free)
-        largest_free = max((bb.size for b in self.blocks if b.is_free), default=0)
+        largest_free = max((b.size for b in self.blocks if b.is_free), default=0)
 
         if total_free == 0:
             self.fragmentation_level = 0.0

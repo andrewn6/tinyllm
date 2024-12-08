@@ -74,21 +74,35 @@ app.add_middleware(
 def initialize_generator():
     if not hasattr(app.state, "generator"):
         try:
+            hidden_size = 1024  
+            num_heads = 16
+            
             model_config = TransformerConfig(
                 num_layers=8,
-                hidden_size=1024,
-                num_attention_heads=16
+                hidden_size=hidden_size,
+                num_attention_heads=num_heads,
+                max_sequence_length=2048,
+                vocab_size=32000,
+                dropout=0.1,
+                layer_norm_epsilon=1e-5,
+                use_cache=True
             )
-            tokenizer_config = TokenizerConfig()
+            
+            tokenizer_config = TokenizerConfig(
+                vocab_size=model_config.vocab_size,
+                max_sequence_length=model_config.max_sequence_length
+            )
 
             model = Transformer(model_config)
+            if app.state.device.type == "cuda":
+                torch.cuda.empty_cache()
             model.to(app.state.device)
             tokenizer = Tokenizer(tokenizer_config)
 
             app.state.generator = TextGenerator(
-                    model=model,
-                    tokenizer=tokenizer,
-                    device=app.state.device
+                model=model,
+                tokenizer=tokenizer,
+                device=app.state.device
             )
             logger.info("Generator initialized successfully")
         except Exception as e:

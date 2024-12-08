@@ -4,3 +4,4 @@ fastapi
 pydantic
 numpy 
 prometheus-client
+uvicorn

@@ -12,6 +12,6 @@ COPY . .
 
 ENV PYTHONPATH=/app
 
-EXPOSE 8080
+EXPOSE 8000 8001
 ENTRYPOINT ["python3", "main.py"]
 CMD ["--mode", "server"]

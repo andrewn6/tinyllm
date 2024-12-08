@@ -43,8 +43,8 @@ class Tokenizer:
         # Then add byte vocabulary
         for i in range(256):
             char = chr(i)
-            if char not in self.vocab:  # Don't overwrite special tokens
-                self.vocab[char] = i + 4  # Offset by 4 to account for special tokens
+            if char not in self.vocab: 
+                self.vocab[char] = i + 4  
                 self.inv_vocab[i + 4] = char
         self.inv_vocab[self.config.eos_token_id] = "<eos>"
 

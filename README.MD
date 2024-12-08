@@ -13,7 +13,9 @@ TinyLLM streamlines the inference pipeline with minimal overhead, focusing on me
 - Seamless integration with existing LLM frameworks
 - Inference API
 
-*This is very much still an experiment, 
+*This is very much still an experiment, especially the tokenizer, our scheduler is somewhat well-written, memory management is decent.*
+
+I'll continue to slowly improve these components over my weekends.
 
 ## Scope
 This is solely a inference engine. It does not:

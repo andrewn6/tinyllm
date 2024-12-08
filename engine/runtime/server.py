@@ -192,14 +192,6 @@ async def get_stats():
     
     return stats
 
-if __name__ == "__main__":
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
-    )
-
 
 @app.post("/generate")
 async def generate_text(request: GenerationRequest):
@@ -244,3 +236,11 @@ async def startup():
             await asyncio.sleep(15)
     
     asyncio.create_task(update_gpu_metrics())
+
+if __name__ == "__main__":
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )

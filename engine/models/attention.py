@@ -55,7 +55,7 @@ class Attention(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         sequence_id: Optional[int] = None,
-        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        past_key_values: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False
     ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         batch_size, seq_length, _ = hidden_states.shape
@@ -78,15 +78,15 @@ class Attention(nn.Module):
         kv_seq_len = key_states.shape[-2]
 
         if self.kv_cache is not None and use_cache:
-            if past_key_value is None and sequence_id is not None:
+            if past_key_values is None and sequence_id is not None:
                 self.kv_cache.allocate_blocks(
                         sequence_id,
                         num_tokens=self.config.max_seq_length
                 )
-                past_key_value = None
-            elif past+key_value is not None:
-                key_states = torch.cat([past_key_value[0], key_states], dim=2)
-                value_states = torch.cat([past_key_value[1], value_states], dim=2)
+                past_key_values = None
+            elif past_key_values is not None:
+                key_states = torch.cat([past_key_values[0], key_states], dim=2)
+                value_states = torch.cat([past_key_values[1], value_states], dim=2)
                 kv_seq_len = key_states.shape[-2]
 
             if sequence_id is not None:
@@ -111,7 +111,7 @@ class Attention(nn.Module):
                 dropout_p=self.config.dropout if self.training else 0.0
         )
 
-        attn_output = attn_output.tranpose(1, 2).contiguous()
+        attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(
             batch_size, seq_length, self.hidden_size
         )

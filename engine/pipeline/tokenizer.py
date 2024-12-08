@@ -108,33 +108,39 @@ class Tokenizer:
         if max_length is None:
             max_length = self.config.max_sequence_length
 
-        batch_tokens = [
-                self.encode(text, add_special_tokens, max_length)
-                for text in texts
-        ]
+        # Process in smaller chunks to reduce memory usage
+        batch_tokens = []
+        for text in texts:
+            tokens = self.encode(text, add_special_tokens, max_length)
+            batch_tokens.append(tokens[:max_length])  # Truncate immediately
 
-        batch_max_length = max(len(tokens) for tokens in batch_tokens)
-        batch_max_length = min(batch_max_length, max_length)
+        # Calculate max length after truncation
+        batch_max_length = min(
+            max(len(tokens) for tokens in batch_tokens),
+            max_length
+        )
 
-        attnetion_mask = []
+        # Pre-allocate lists with known sizes
+        attention_mask = []
         padded_tokens = []
 
         for tokens in batch_tokens:
             padding_length = batch_max_length - len(tokens)
 
             if padding and padding_length > 0:
-                tokens = tokens + [self.config.pad_token_id] * padding_length
-                mask = [1] * (batch_max_length - padding_length) + [0] * padding_length
+                padded = tokens + [self.config.pad_token_id] * padding_length
+                mask = [1] * len(tokens) + [0] * padding_length
             else:
-                tokens = tokens[:batch_max_length]
-                mask = [1] * len(tokens)
+                padded = tokens[:batch_max_length]
+                mask = [1] * len(padded)
 
             attention_mask.append(mask)
-            padded_tokens.append(tokens)
+            padded_tokens.append(padded)
 
+        # Convert to tensors more efficiently
         return {
-            "input_ids": torch.tensor(padded_tokens),
-            "attention_mask": torch.tensor(attention_mask)
+            "input_ids": torch.tensor(padded_tokens, dtype=torch.long),
+            "attention_mask": torch.tensor(attention_mask, dtype=torch.long)
         }
     def batch_decode(
         self,

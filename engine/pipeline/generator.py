@@ -107,7 +107,7 @@ class TextGenerator:
         input_ids = encoded["input_ids"].to(self.device)
         attention_mask = encoded["attention_mask"].to(self.device)
         
-        sequence_id = seld.get_sequence_id()
+        sequence_id = self.get_sequence_id()
         past_key_values = None
 
         for _ in range(config.max_new_tokens):
@@ -147,7 +147,7 @@ class TextGenerator:
         config: GenerationConfig
     ) -> torch.Tensor:
         batch_size = input_ids.shape[0]
-        sequence_id = self._get_sequence_id()
+        sequence_id = self.get_sequence_id()
         past_key_values = None
 
         all_token_ids = input_ids
@@ -211,8 +211,8 @@ class TextGenerator:
 
         return next_tokens
     
-    def _get_sequence_id(self) -> int:
+    def get_sequence_id(self) -> int:
         sequence_id = self.current_sequence_id
-        self.current_sequence += 1
+        self.current_sequence_id += 1
 
         return sequence_id

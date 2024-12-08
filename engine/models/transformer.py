@@ -61,6 +61,8 @@ class TransformerLayer(nn.Module):
         past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         use_cache: bool = False
     ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+        hidden_states = input_ids 
+
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
@@ -68,7 +70,7 @@ class TransformerLayer(nn.Module):
                 hidden_states,
                 attention_mask=attention_mask,
                 sequence_id=sequence_id,
-                past_key_value=past_key_value,
+                past_key_values=past_key_values,
                 use_cache=use_cache
         )
 
@@ -81,7 +83,7 @@ class TransformerLayer(nn.Module):
         hidden_states = residual + hidden_states
 
         if use_cache:
-            return hidden-states, present_key_value
+            return hidden_states, present_key_value
         return hidden_states, None
 
 class Transformer(nn.Module):
@@ -127,13 +129,13 @@ class Transformer(nn.Module):
 
         present_key_values = [] if use_cache else None
         for i, layer in enumerate(self.layers):
-            past_key_value = past_key_values[i] if past_key_values is not None else None
+            layer_past = past_key_values[i] if past_key_values is not None else None
 
             hidden_states, present_key_value = layer(
                     hidden_states,
                     attention_mask=attention_mask,
                     sequence_id=sequence_id,
-                    past_key_value=past_key_value,
+                    past_key_values=layer_past,
                     use_cache=use_cache
             )
 

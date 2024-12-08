@@ -11,7 +11,7 @@ from contextlib import nullcontext
 
 class DeviceType(Enum):
     CUDA = "cuda"
-    mps = "mps"
+    MPS = "mps"
     CPU = "cpu"
 
 def get_device_type(device: torch.device) -> DeviceType:
@@ -81,7 +81,7 @@ class BlockManager:
         MPS doesn't provide memory info or streams ;(
         """
         self.stream = None 
-        stream.availaible_memory = None
+        self.available_memory = None
 
     def setup_cpu(self):
         self.stream = None

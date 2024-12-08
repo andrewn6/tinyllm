@@ -14,7 +14,7 @@ class AttentionConfig:
     use_kv_cache: bool = True
 
 class Attention(nn.Module):
-    def __init_(
+    def __init__(
             self,
             config: AttentionConfig,
             kernel_manager: Optional[KernelManager] = None
@@ -24,7 +24,7 @@ class Attention(nn.Module):
 
         self.num_heads = config.num_heads
         self.head_dim = config.head_dim
-        self.hidden_size = config.num_Heads * config.head_dim
+        self.hidden_size = config.num_heads * config.head_dim
 
         self.q_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)

@@ -16,7 +16,7 @@ class FFN(nn.Module):
         self.config = config
 
         self.up_proj = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.down_proj = nn.Linear(config.intermediate_size, config.hidden__size)
+        self.down_proj = nn.Linear(config.intermediate_size, config.hidden_size)
 
         # activate
         self.act = nn.GELU() if config.activation == "gelu" else nn.ReLU()

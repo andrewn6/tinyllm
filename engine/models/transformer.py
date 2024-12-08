@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 from .attention import Attention, AttentionConfig
 from .ffn import FFN, FFNConfig
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
+from dataclasses import dataclass
+from engine.compute.kernels import KernelManager
 
 @dataclass
 class TransformerConfig:
@@ -51,15 +53,14 @@ class TransformerLayer(nn.Module):
         self.ffn = FFN(ffn_config)
 
 
-
     def forward(
         self,
-        hidden_states: torch.Tensor,
+        input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         sequence_id: Optional[int] = None,
-        past_key_value = Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         use_cache: bool = False
-    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 

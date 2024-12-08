@@ -30,7 +30,7 @@ class ScheduledOperation:
 class BatchConfig:
     def __init__(
         self,
-        max_batch_size: int = 32
+        max_batch_size: int = 32,
         max_sequence_length: int = 2048,
         dynamic_batching: bool = True,
         batch_timeout_ms: float = 5.0
@@ -127,11 +127,11 @@ class Scheduler:
 
     def schedule_operation(
         self,
-        op_type: OperationType
+        op_type: OperationType,
         callback: Callable,
         data: Any,
         batch_size: int = 1,
-        seq_length: int = 0m
+        seq_length: int = 0,
         priority: int = 1
     ) -> str:
         operation = ScheduledOperation(
@@ -162,7 +162,7 @@ class Scheduler:
             time.sleep(0.001)
 
     def _process_queues(self):
-        while not in self.high_priority_queue.empty():
+        while not self.high_priority_queue.empty():
             operation = self.high_priority_queue.get()
             self._try_batch_operation(operation)
 

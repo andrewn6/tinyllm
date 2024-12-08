@@ -1,0 +1,33 @@
+version: '3'
+
+services:
+  fastllm-cuda:
+    build:
+      context: .
+      dockerfile: Dockerfile.cuda
+    image: fastllm:cuda
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./config:/app/config
+    environment:
+      - CUDA_VISIBLE_DEVICES=all
+    command: ["--mode", "server"]
+
+  fastllm-m1:
+    build:
+      context: .
+      dockerfile: Dockerfile.m1
+    image: fastllm:m1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config
+    command: ["--mode", "server"]

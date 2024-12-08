@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'tinyllm'
+    static_configs:
+      - targets: ['fastllm-cuda:8001', 'fastllm-m1:8001']
+    metrics_path: '/metrics'

@@ -1,4 +1,6 @@
+transformers
 torch
 fastapi
 pydantic
 numpy 
+prometheus-client

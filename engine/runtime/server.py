@@ -7,13 +7,16 @@ import torch
 import time
 import logging
 import uvicorn
+import asyncio
 
+from ..metrics.prometheus import PrometheusMetrics, PrometheusConfig
 from contextlib import asynccontextmanager
 from ..models.transformer import Transformer, TransformerConfig
 from ..pipeline.tokenizer import Tokenizer, TokenizerConfig
 from ..pipeline.generator import TextGenerator, GenerationConfig
 
 logger = logging.getLogger(__name__)
+metrics = PrometheusMetrics(PrometheusConfig())
 
 class GenerationRequest(BaseModel):
     prompt: str
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, "generator"):
         del app.state.generator
 
+
 app = FastAPI(
     title="TinyLLM",
     description="Inference at warp-speed",
@@ -72,7 +76,7 @@ def initialize_generator():
             tokenizer_config = TokenizerConfig()
 
             model = Transformer(model_config)
-            moddel.to(app.state.device)
+            model.to(app.state.device)
             tokenizer = Tokenizer(tokenizer_config)
 
             app.state.generator = TextGenerator(
@@ -195,3 +199,48 @@ if __name__ == "__main__":
         port=8000,
         log_level="info"
     )
+
+
+@app.post("/generate")
+async def generate_text(request: GenerationRequest):
+    start_time = time.time()
+    try:
+        metrics.record_request("transformer", "generate")
+        
+        output = app.state.generator(
+            request.prompt,
+            config=GenerationConfig(
+                max_new_tokens=request.max_new_tokens,
+                temperature=request.temperature,
+                top_k=request.top_k,
+                top_p=request.top_p,
+                do_sample=request.do_sample
+            )
+        )
+        
+        duration = time.time() - start_time
+        metrics.record_latency("transformer", "generate", duration)
+        metrics.record_tokens(
+            "transformer",
+            len(request.prompt.split()),
+            len(output.split())
+        )
+        
+        return {"text": output}
+        
+    except Exception as e:
+        metrics.record_error("transformer", type(e).__name__)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.on_event("startup")
+async def startup():
+    async def update_gpu_metrics():
+        while True:
+            if torch.cuda.is_available():
+                for i in range(torch.cuda.device_count()):
+                    memory_used = torch.cuda.memory_allocated(i)
+                    metrics.update_gpu_memory(f"cuda:{i}", memory_used)
+            await asyncio.sleep(15)
+    
+    asyncio.create_task(update_gpu_metrics())

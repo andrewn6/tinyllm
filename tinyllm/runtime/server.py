@@ -2,9 +2,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 import os
-from ..ollama.adapter import OllamaAdapter
 import torch
 import time
 import logging
@@ -47,21 +46,20 @@ class GenerationResponse(BaseModel):
 async def lifespan(app: FastAPI):
     logger.info("Starting TinyLLM server...")
     app.state.device = torch.device(
-            "cuda" if torch.cuda.is_available() else
-            "mps" if torch.backends.mps.is_available() else
-            "cpu"
+        "cuda" if torch.cuda.is_available() else
+        "mps" if torch.backends.mps.is_available() else "cpu"
     )
-    logger.info("Shutting down FastLLM server...")
+    logger.info(f"Using device: {app.state.device}")
     yield
     if hasattr(app.state, "generator"):
         del app.state.generator
         if torch.cuda.is_available():
-            torch.cuda.empty_cach()
-
+            torch.cuda.empty_cache()
+    logger.info("Shutting down TinyLLM server...")
 
 app = FastAPI(
     title="TinyLLM",
-    description="Inference at warp-speed",
+    description="High-performance inference engine",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -77,7 +75,6 @@ app.add_middleware(
 def initialize_generator():
     if not hasattr(app.state, "generator"):
         try:
-            model_type = os.getenv("MODEL_TYPE", "native")
             model_name = os.getenv("MODEL_NAME", "default")
             model_version = os.getenv("MODEL_VERSION")
             
@@ -86,14 +83,6 @@ def initialize_generator():
             
             if not model_info:
                 raise ValueError(f"Model {model_name} not found")
-
-            if model_type == "ollama":
-                app.state.generator = OllamaAdapter(
-                    model_name,
-                    device=app.state.device
-                )
-                logger.info(f"Initialized Ollama model: {model_name}")
-                return
             
             # Load model from registry
             model_config = TransformerConfig(**model_info.config)
@@ -107,19 +96,22 @@ def initialize_generator():
                 model.load_state_dict(state_dict)
             
             model.to(app.state.device)
+            model.eval()
             
+            # Initialize tokenizer
             tokenizer_config = TokenizerConfig(
                 vocab_size=model_config.vocab_size,
                 max_sequence_length=model_config.max_sequence_length
             )
             tokenizer = Tokenizer(tokenizer_config)
 
+            # Initialize generator
             app.state.generator = TextGenerator(
                 model=model,
                 tokenizer=tokenizer,
                 device=app.state.device
             )
-            logger.info(f"Initialized {model_type} model: {model_name}")
+            logger.info(f"Initialized model: {model_name}")
             
         except Exception as e:
             logger.error(f"Failed to initialize generator: {e}")
@@ -141,11 +133,13 @@ async def health_check():
         "model_loaded": hasattr(app.state, "generator")
     }
 
-@app.post('/generate', response_model=GenerationResponse)
+@app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
     initialize_generator()
+    metrics.record_request("generate")
+    start_time = time.time()
 
-    try: 
+    try:
         config = GenerationConfig(
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,
@@ -154,34 +148,38 @@ async def generate(request: GenerationRequest):
             do_sample=request.do_sample
         )
 
-        start_time = time.time()
-
         if request.stream:
             return StreamingResponse(
-                    app.state.generator.stream(request.prompt, config),
-                    media_type='text/event-stream'
+                app.state.generator.stream(request.prompt, config),
+                media_type='text/event-stream'
             )
 
         output = app.state.generator(request.prompt, config)
         tokens_generated = len(output.split()) - len(request.prompt.split())
         time_taken = time.time() - start_time
 
+        metrics.record_latency("generate", time_taken)
+        metrics.record_tokens(len(request.prompt.split()), tokens_generated)
+
         return GenerationResponse(
-                text=output,
-                tokens_generated=tokens_generated,
-                time_taken=time_taken
+            text=output,
+            tokens_generated=tokens_generated,
+            time_taken=time_taken
         )
 
     except Exception as e:
+        metrics.record_error(type(e).__name__)
         logger.error(f"Generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate_batch")
 async def generate_batch(request: BatchGenerationRequest):
     initialize_generator()
+    metrics.record_request("generate_batch")
+    start_time = time.time()
 
     try:
-        config = GenerationConfig(  # Make sure this line is properly indented
+        config = GenerationConfig(
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,
             top_k=request.top_k,
@@ -189,17 +187,24 @@ async def generate_batch(request: BatchGenerationRequest):
             do_sample=request.do_sample
         )
         
-        start_time = time.time()  # This line should be at the same level as config
         outputs = app.state.generator(request.prompts, config)
         time_taken = time.time() - start_time
         
         results = []
+        total_tokens = 0
         for prompt, output in zip(request.prompts, outputs):
             tokens_generated = len(output.split()) - len(prompt.split())
+            total_tokens += tokens_generated
             results.append({
                 "text": output,
                 "tokens_generated": tokens_generated
             })
+        
+        metrics.record_latency("generate_batch", time_taken)
+        metrics.record_tokens(
+            sum(len(p.split()) for p in request.prompts),
+            total_tokens
+        )
             
         return {
             "results": results,
@@ -207,6 +212,7 @@ async def generate_batch(request: BatchGenerationRequest):
         }
         
     except Exception as e:
+        metrics.record_error(type(e).__name__)
         logger.error(f"Batch generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -218,7 +224,6 @@ async def get_stats():
         "model_loaded": hasattr(app.state, "generator")
     }
     
-    # Add device-specific stats
     if app.state.device.type == "cuda":
         stats["memory"] = {
             "allocated": torch.cuda.memory_allocated(app.state.device),
@@ -227,39 +232,6 @@ async def get_stats():
         }
     
     return stats
-
-
-@app.post("/generate")
-async def generate_text(request: GenerationRequest):
-    start_time = time.time()
-    try:
-        metrics.record_request("transformer", "generate")
-        
-        output = app.state.generator(
-            request.prompt,
-            config=GenerationConfig(
-                max_new_tokens=request.max_new_tokens,
-                temperature=request.temperature,
-                top_k=request.top_k,
-                top_p=request.top_p,
-                do_sample=request.do_sample
-            )
-        )
-        
-        duration = time.time() - start_time
-        metrics.record_latency("transformer", "generate", duration)
-        metrics.record_tokens(
-            "transformer",
-            len(request.prompt.split()),
-            len(output.split())
-        )
-        
-        return {"text": output}
-        
-    except Exception as e:
-        metrics.record_error("transformer", type(e).__name__)
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.on_event("startup")
 async def startup():
@@ -274,9 +246,4 @@ async def startup():
     asyncio.create_task(update_gpu_metrics())
 
 if __name__ == "__main__":
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

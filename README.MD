@@ -10,7 +10,6 @@ TinyLLM streamlines the inference pipeline with minimal overhead, focusing on me
 - Efficient batch processing and response streaming
 - Optimized scheduling for multi-model deployments
 - Custom tokenizer implmentation for self-developed models
-- Seamless integration with existing LLM frameworks
 - Inference API
 - KV cache implementation
 - Training CLI for development models

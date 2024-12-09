@@ -26,4 +26,35 @@ This is solely a inference engine. It does not:
 - Include pre-trained models
 - Support distributed training
 
-## Running via CLI
+## How to use?
+
+Clone repository
+```
+git clone https://github.com/andrewn6/tinyllm
+```
+```
+pip install -e . 
+```
+
+Register your trained model
+```
+tinyllm model register transformer-19m v1 \
+    --checkpoint models/tiny-19m.pt \
+    --model-type native \
+    --description "19M parameter transformer"
+```
+
+Serve and expose to localhost
+```
+tinyllm serve \
+    --model-name mymodel \
+    --port 8000 \
+    --model-type native
+```
+
+List models
+```
+tinyllm model list
+```
+
+

@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Union, Callable, Any, Tuple
 from enum import Enum
 from queue import PriorityQueue
 from concurrent.futures import ThreadPoolExecutor
-from engine.memory.cache import get_best_device, DeviceType, get_device_type
+from tinyllm.memory.cache import get_best_device, DeviceType, get_device_type
 
 class OperationType(Enum):
     ATTENTION = "attention"

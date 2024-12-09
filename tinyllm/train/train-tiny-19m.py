@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from engine.models.tiny import TinyLLM
+from tinyllm.models.tiny import TinyLLM
 import json
 import os
 from tqdm import tqdm

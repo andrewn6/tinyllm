@@ -4,10 +4,10 @@ import torch.nn as nn
 from typing import Optional, Dict, Any, Union, List, Tuple
 from dataclasses import dataclass
 
-from engine.memory.cache import PagedKVCache
-from engine.compute.kernels import KernelManager
-from engine.pipeline.generator import GenerationConfig
-from engine.pipeline.tokenizer import Tokenizer, TokenizerConfig
+from tinyllm.memory.cache import PagedKVCache
+from tinyllm.compute.kernels import KernelManager
+from tinyllm.pipeline.generator import GenerationConfig
+from tinyllm.pipeline.tokenizer import Tokenizer, TokenizerConfig
 
 @dataclass
 class ModelConfig:

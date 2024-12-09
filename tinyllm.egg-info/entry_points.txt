@@ -1,0 +1,2 @@
+[console_scripts]
+tinyllm = tinyllm.cli.commands:cli

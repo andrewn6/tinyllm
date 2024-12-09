@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple
 from dataclasses import dataclass
-from engine.compute.kernels import KernelManager, KernelConfig
-from engine.memory.cache import PagedKVCache
+from tinyllm.compute.kernels import KernelManager, KernelConfig
+from tinyllm.memory.cache import PagedKVCache
 
 @dataclass
 class AttentionConfig:

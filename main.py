@@ -6,10 +6,10 @@ from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from engine.models.transformer import Transformer, TransformerConfig
-from engine.pipeline.tokenizer import Tokenizer, TokenizerConfig
-from engine.pipeline.generator import TextGenerator
-from engine.runtime.server import app
+from tinyllm.models.transformer import Transformer, TransformerConfig
+from tinyllm.pipeline.tokenizer import Tokenizer, TokenizerConfig
+from tinyllm.pipeline.generator import TextGenerator
+from tinyllm.runtime.server import app
 
 def initialize_app():
    device = torch.device("cuda" if torch.cuda.is_available() else 

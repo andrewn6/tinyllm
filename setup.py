@@ -1,18 +1,21 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="engine",
+    name="tinyllm",
     version="0.1.0",
-    packages=find_packages(),
+    packages=['tinyllm'] + ['tinyllm.' + pkg for pkg in find_packages(where='tinyllm')],
+    package_dir={'': '.'},
     install_requires=[
-        "torch>=2.0.0",
-        "click>=8.0.0",
-        "fastapi>=0.68.0",
-        "uvicorn>=0.15.0",
+        'torch',
+        'numpy',
+        'fastapi',
+        'uvicorn',
+        'requests',
+        'click>=8.0.0'
     ],
     entry_points={
         'console_scripts': [
-            'engine=engine.cli.main:main',
+            'tinyllm=tinyllm.cli.commands:cli',
         ],
     },
 )

@@ -4,7 +4,7 @@ from .attention import Attention, AttentionConfig
 from .ffn import FFN, FFNConfig
 from typing import Tuple, Optional, List
 from dataclasses import dataclass
-from engine.compute.kernels import KernelManager
+from tinyllm.compute.kernels import KernelManager
 
 @dataclass
 class TransformerConfig:

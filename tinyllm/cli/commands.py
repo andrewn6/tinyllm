@@ -1,5 +1,6 @@
 import click 
-from ..runtime.server import serve 
+import uvicorn
+from ..runtime.server import app 
 from ..registry.registry import ModelRegistry
 import os
 
@@ -32,6 +33,7 @@ def register(name, version, config, checkpoint, model_type, description):
 
 @model.command()
 def list():
+    """List all registered models"""
     registry = ModelRegistry()
     for model_id, info in registry.list_models().items():
         click.echo(f"\n{model_id}:")
@@ -45,10 +47,11 @@ def list():
 @click.option('--model-type', default='native')
 @click.option('--model-version', default=None)
 def serve(host, port, model_name, model_type, model_version):
+    """Start the TinyLLM server"""
     os.environ['MODEL_TYPE'] = model_type
     os.environ['MODEL_NAME'] = model_name
     if model_version:
         os.environ['MODEL_VERSION'] = model_version
     
     click.echo(f"Starting server with {model_type} model: {model_name}")
-    serve(host=host, port=port)
+    uvicorn.run(app, host=host, port=port)

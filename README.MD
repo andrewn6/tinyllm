@@ -25,3 +25,5 @@ This is solely a inference engine. It does not:
 - Implement large model architectures
 - Include pre-trained models
 - Support distributed training
+
+## Running via CLI

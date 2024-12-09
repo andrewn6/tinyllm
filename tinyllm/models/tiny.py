@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from typing import Optional, List, Tuple, Any
-from engine.models.base import BaseLLM, ModelConfig
-from engine.pipeline.tokenizer import Tokenizer, TokenizerConfig
+from tinyllm.models.base import BaseLLM, ModelConfig
+from tinyllm.pipeline.tokenizer import Tokenizer, TokenizerConfig
 
 class TinyLLM(BaseLLM):
     """Tiny model for testing - 8M params"""

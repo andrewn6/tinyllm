@@ -12,6 +12,8 @@ import asyncio
 
 from ..metrics.prometheus import PrometheusMetrics, PrometheusConfig
 from contextlib import asynccontextmanager
+
+from ..compute.scheduler import Scheduler, OperationType, BatchConfig
 from ..models.transformer import Transformer, TransformerConfig
 from ..pipeline.tokenizer import Tokenizer, TokenizerConfig
 from ..pipeline.generator import TextGenerator, GenerationConfig
@@ -285,12 +287,58 @@ async def get_stats():
 
 @app.on_event("startup")
 async def startup():
-    """Initialize metrics collection on startup"""
     if metrics.config.enabled:
         from prometheus_client import start_http_server
         start_http_server(metrics.config.port)
         logger.info(f"Started Prometheus metrics server on port {metrics.config.port}")
-        
+
+    model_name = os.getenv('MODEL_NAME')
+    model_version = os.getenv('MODEL_VERSION')
+
+    if not model_name:
+        raise ValueError("MODEL_NAME environment variable must be set")
+    
+    app.state.device = torch.device("cuda" if torch.cuda.is_available() else 
+                                  "mps" if torch.backends.mps.is_available() else "cpu")
+
+    app.state.scheduler = Scheduler(
+        batch_config=BatchConfig(
+            max_batch_size=32,
+            max_sequence_length=128,
+            dynamic_batching=True
+        ),
+        device=app.state.device
+    )
+
+    registry = ModelRegistry()
+    model_info = registry.get_model(model_name, model_version)
+
+    if not model_info:
+        available = registry.list_models()
+        raise ValueError(f"Model {model_name} not found.")
+    
+    logger.info(f"Loading model {model_name} from {model_info.checkpoint_path}")
+
+    """Initialize model components"""
+    model_config = TransformerConfig(**model_info.config)
+    model = Transformer(model_config)
+    model.load_state_dict(torch.load(model_info.checkpoint_path, map_location=app.state.device))
+    model = model.to(app.state.device)
+    model.eval()
+
+    tokenizer_config = TokenizerConfig(
+        vocab_size=model_config.vocab_size,
+        max_sequence_length=model_config.max_sequence_length
+    )
+    tokenizer = Tokenizer(tokenizer_config)
+
+    app.state.generator = TextGenerator(
+        model=model,
+        tokenizer=tokenizer,
+        device=app.state.device
+    )
+
+    if metrics.config.enabled:
         async def update_metrics():
             while True:
                 if torch.cuda.is_available():
@@ -299,14 +347,14 @@ async def startup():
                         memory_reserved = torch.cuda.memory_reserved(i)
                         metrics.update_gpu_memory(f"cuda:{i}", memory_used)
                         metrics.update_gpu_reserved_memory(f"cuda:{i}", memory_reserved)
-                
-                # Update model metrics if loaded
+                    
                 if hasattr(app.state, "generator"):
                     metrics.update_model_stats(app.state.generator)
                 
                 await asyncio.sleep(15)
-        
+                
         asyncio.create_task(update_metrics())
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

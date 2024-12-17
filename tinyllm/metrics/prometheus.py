@@ -1,7 +1,8 @@
-from prometheus_client import Counter, Histogram, Gauge, start_http_server
+from prometheus_client import Counter, Histogram, Gauge
 from dataclasses import dataclass
 from typing import Optional
 import os
+import torch
 
 @dataclass
 class PrometheusConfig:
@@ -12,10 +13,8 @@ class PrometheusConfig:
 
 class PrometheusMetrics:
     def __init__(self, config: Optional[PrometheusConfig] = None):
-        # Allow environment variables to override config
         self.config = config or PrometheusConfig()
         
-        # Environment overrides
         if os.getenv('ENABLE_METRICS'):
             self.config.enabled = os.getenv('ENABLE_METRICS').lower() == 'true'
         if os.getenv('METRICS_PORT'):
@@ -60,6 +59,24 @@ class PrometheusMetrics:
             'GPU memory usage in bytes',
             ['device']
         )
+        
+        # Add model stats metrics
+        self.model_memory_usage = Gauge(
+            'tinyllm_model_memory_bytes',
+            'Model memory usage in bytes',
+            ['type']  # 'parameters', 'gradients', etc.
+        )
+        
+        self.model_parameters = Gauge(
+            'tinyllm_model_parameters_total',
+            'Total number of model parameters'
+        )
+        
+        self.gpu_reserved_memory = Gauge(
+            'tinyllm_gpu_reserved_bytes',
+            'GPU reserved memory in bytes',
+            ['device']
+        )
 
     def record_request(self, endpoint: str):
         if not self.config.enabled:
@@ -86,6 +103,31 @@ class PrometheusMetrics:
         if not self.config.enabled:
             return
         self.gpu_memory_usage.labels(device=device).set(bytes_used)
+
+    def update_model_stats(self, generator: 'TextGenerator'):
+        if not self.config.enabled:
+            return
+            
+        model = generator.model
+        
+        # Count parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        self.model_parameters.set(total_params)
+        
+        # Memory usage for parameters
+        param_memory = sum(p.nelement() * p.element_size() for p in model.parameters())
+        self.model_memory_usage.labels(type='parameters').set(param_memory)
+        
+        # If using CUDA, get memory stats
+        if next(model.parameters()).is_cuda:
+            reserved = torch.cuda.memory_reserved(0)  # assumes device 0
+            self.model_memory_usage.labels(type='reserved').set(reserved)
+
+    def update_gpu_reserved_memory(self, device: str, bytes_reserved: int):
+        """Update GPU reserved memory metric"""
+        if not self.config.enabled:
+            return
+        self.gpu_reserved_memory.labels(device=device).set(bytes_reserved)
 
     @classmethod
     def create_standalone(cls, port: int = 8001) -> 'PrometheusMetrics':

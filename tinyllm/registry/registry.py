@@ -1,5 +1,5 @@
 from pathlib import Path 
-from typing import Dict, Optional, Union, List
+from typing import Dict, Optional, Union, List, Any
 from dataclasses import dataclass
 from datetime import datetime
 import json 
@@ -11,74 +11,53 @@ import importlib
 class ModelInfo:
     name: str
     version: str
-    config: dict
     checkpoint_path: str
-    model_type: str = "native"
-    model_class: Optional[str] = None
+    config_path: str
     description: str = ""
-    created_at: str = str(datetime.now())
-    author: Optional[str] = None
-    tags: List[str] = None
+    metrics_config: Optional[Dict[str, Any]] = None
 
 class ModelRegistry:
-    def __init__(self, models_dir: Union[str, Path] = "models"):
-        self.models_dir = Path(models_dir)
-        self.models_dir.mkdir(exist_ok=True)
+    def __init__(self):
+        self.models_dir = Path.home() / ".tinyllm" / "models"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
         self.models: Dict[str, ModelInfo] = {}
         self._load_models()
-
-    def register_model(
-        self,
-        name: str,
-        version: str,
-        config_path: Union[str, Path],
-        checkpoint_path: Union[str, Path],
-        model_type: str = "native",
-        model_class: Optional[str] = None,
-        description: str = "",
-        author: Optional[str] = None,
-        tags: Optional[List[str]] = None
-    ):
-        if model_type == "custom":
-            if not model_class:
-                raise ValueError("model_class required for custom models")
-            try:
-                module_path, class_name = model_class.rsplit('.', 1)
-                module = importlib.import_module(module_path)
-                getattr(module, class_name)
-            except Exception as e:
-                raise ValueError(f"Invalid model_class: {e}")
-
-        model_dir = self.models_dir / f"{name}-{version}"
+    
+    def register_model(self,
+                      name: str,
+                      version: str,
+                      checkpoint_path: str,
+                      config_path: str,
+                      description: str = "",
+                      metrics_config: Optional[Dict[str, Any]] = None) -> ModelInfo:
+        """Register a model in the registry"""
+        model_id = f"{name}-{version}"
+        model_dir = self.models_dir / model_id
         model_dir.mkdir(exist_ok=True)
-
-        with open(config_path) as f:
-            config = json.load(f)
-
-        new_checkpoint_path = model_dir / "model.pt"
-        shutil.copy2(checkpoint_path, new_checkpoint_path)
-
-        model_info = ModelInfo(
+        
+        # Copy files to registry
+        new_checkpoint = model_dir / "model.pt"
+        new_config = model_dir / "config.json"
+        
+        shutil.copy2(checkpoint_path, new_checkpoint)
+        shutil.copy2(config_path, new_config)
+        
+        # Create model info
+        info = ModelInfo(
             name=name,
             version=version,
-            config=config,
-            checkpoint_path=str(new_checkpoint_path),
-            model_type=model_type,
-            model_class=model_class,
+            checkpoint_path=str(new_checkpoint),
+            config_path=str(new_config),
             description=description,
-            author=author,
-            tags=tags or []
+            metrics_config=metrics_config
         )
-
-        model_id = f"{name}-{version}"
-        self.models[model_id] = model_info
-
-        info_path = model_dir / "info.json"
-        with open(info_path, 'w') as f:
-            json.dump(model_info.__dict__, f, indent=2)
-
-        return model_info
-    
+        
+        # Save info
+        with open(model_dir / "info.json", "w") as f:
+            json.dump(info.__dict__, f, indent=2)
+        
+        self.models[model_id] = info
+        return info
     
     def get_model(self, name: str, version: Optional[str] = None) -> Optional[ModelInfo]:
         if version:

@@ -18,7 +18,12 @@ from ..pipeline.generator import TextGenerator, GenerationConfig
 from ..registry.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
-metrics = PrometheusMetrics(PrometheusConfig())
+metrics = PrometheusMetrics(
+    PrometheusConfig(
+        port=int(os.getenv('METRICS_PORT', 8001)),
+        enabled=os.getenv('ENABLE_METRICS', 'false').lower() == 'true'
+    )
+)
 
 class GenerationRequest(BaseModel):
     prompt: str
@@ -130,14 +135,27 @@ async def health_check():
     return {
         "status": "healthy",
         "device": str(app.state.device),
-        "model_loaded": hasattr(app.state, "generator")
+        "model_loaded": hasattr(app.state, "generator"),
+        "metrics_enabled": metrics.config.enabled,
+        "metrics_port": metrics.config.port if metrics.config.enabled else None
     }
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint():
+    """Prometheus metrics endpoint"""
+    if not metrics.config.enabled:
+        raise HTTPException(status_code=404, detail="Metrics not enabled")
+    
+    # Get current metrics
+    return metrics.get_current_metrics()
 
 @app.post("/generate", response_model=GenerationResponse)
 async def generate(request: GenerationRequest):
     initialize_generator()
+    
+    # Record request start
     metrics.record_request("generate")
-    start_time = time.time()
+    request_start = time.time()
 
     try:
         config = GenerationConfig(
@@ -149,17 +167,31 @@ async def generate(request: GenerationRequest):
         )
 
         if request.stream:
+            # Record streaming request
+            metrics.record_request("generate_stream")
             return StreamingResponse(
                 app.state.generator.stream(request.prompt, config),
                 media_type='text/event-stream'
             )
 
+        # Generate text
         output = app.state.generator(request.prompt, config)
+        
+        # Calculate metrics
         tokens_generated = len(output.split()) - len(request.prompt.split())
-        time_taken = time.time() - start_time
+        time_taken = time.time() - request_start
 
+        # Record detailed metrics
         metrics.record_latency("generate", time_taken)
         metrics.record_tokens(len(request.prompt.split()), tokens_generated)
+        metrics.record_throughput(tokens_generated / time_taken)
+        
+        # Record memory metrics if on CUDA
+        if torch.cuda.is_available():
+            metrics.record_gpu_memory(
+                torch.cuda.memory_allocated(),
+                torch.cuda.memory_reserved()
+            )
 
         return GenerationResponse(
             text=output,
@@ -168,6 +200,7 @@ async def generate(request: GenerationRequest):
         )
 
     except Exception as e:
+        # Record error metrics with error type
         metrics.record_error(type(e).__name__)
         logger.error(f"Generation error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -175,8 +208,11 @@ async def generate(request: GenerationRequest):
 @app.post("/generate_batch")
 async def generate_batch(request: BatchGenerationRequest):
     initialize_generator()
+    
+    # Record batch request metrics
     metrics.record_request("generate_batch")
-    start_time = time.time()
+    metrics.record_batch_size(len(request.prompts))
+    request_start = time.time()
 
     try:
         config = GenerationConfig(
@@ -188,23 +224,33 @@ async def generate_batch(request: BatchGenerationRequest):
         )
         
         outputs = app.state.generator(request.prompts, config)
-        time_taken = time.time() - start_time
+        time_taken = time.time() - request_start
         
         results = []
-        total_tokens = 0
+        total_input_tokens = 0
+        total_generated_tokens = 0
+        
         for prompt, output in zip(request.prompts, outputs):
             tokens_generated = len(output.split()) - len(prompt.split())
-            total_tokens += tokens_generated
+            total_input_tokens += len(prompt.split())
+            total_generated_tokens += tokens_generated
             results.append({
                 "text": output,
                 "tokens_generated": tokens_generated
             })
         
+        # Record detailed batch metrics
         metrics.record_latency("generate_batch", time_taken)
-        metrics.record_tokens(
-            sum(len(p.split()) for p in request.prompts),
-            total_tokens
-        )
+        metrics.record_tokens(total_input_tokens, total_generated_tokens)
+        metrics.record_throughput(total_generated_tokens / time_taken)
+        metrics.record_batch_latency_per_sequence(time_taken / len(request.prompts))
+        
+        # Record memory metrics if on CUDA
+        if torch.cuda.is_available():
+            metrics.record_gpu_memory(
+                torch.cuda.memory_allocated(),
+                torch.cuda.memory_reserved()
+            )
             
         return {
             "results": results,
@@ -218,10 +264,11 @@ async def generate_batch(request: BatchGenerationRequest):
 
 @app.get("/stats")
 async def get_stats():
-    """Get server statistics"""
+    """Get detailed server statistics including metrics"""
     stats = {
         "device": str(app.state.device),
-        "model_loaded": hasattr(app.state, "generator")
+        "model_loaded": hasattr(app.state, "generator"),
+        "metrics_enabled": metrics.config.enabled
     }
     
     if app.state.device.type == "cuda":
@@ -231,19 +278,31 @@ async def get_stats():
             "max_allocated": torch.cuda.max_memory_allocated(app.state.device)
         }
     
+    if metrics.config.enabled:
+        stats["metrics"] = metrics.get_summary()
+    
     return stats
 
 @app.on_event("startup")
 async def startup():
-    async def update_gpu_metrics():
-        while True:
-            if torch.cuda.is_available():
-                for i in range(torch.cuda.device_count()):
-                    memory_used = torch.cuda.memory_allocated(i)
-                    metrics.update_gpu_memory(f"cuda:{i}", memory_used)
-            await asyncio.sleep(15)
-    
-    asyncio.create_task(update_gpu_metrics())
+    """Initialize metrics collection on startup"""
+    if metrics.config.enabled:
+        async def update_metrics():
+            while True:
+                if torch.cuda.is_available():
+                    for i in range(torch.cuda.device_count()):
+                        memory_used = torch.cuda.memory_allocated(i)
+                        memory_reserved = torch.cuda.memory_reserved(i)
+                        metrics.update_gpu_memory(f"cuda:{i}", memory_used)
+                        metrics.update_gpu_reserved_memory(f"cuda:{i}", memory_reserved)
+                
+                # Update model metrics if loaded
+                if hasattr(app.state, "generator"):
+                    metrics.update_model_stats(app.state.generator)
+                
+                await asyncio.sleep(15)
+        
+        asyncio.create_task(update_metrics())
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")

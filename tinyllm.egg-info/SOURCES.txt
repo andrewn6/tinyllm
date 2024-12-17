@@ -14,9 +14,6 @@ setup.py
 ./tinyllm/models/ffn.py
 ./tinyllm/models/tiny.py
 ./tinyllm/models/transformer.py
-./tinyllm/ollama/__init__.py
-./tinyllm/ollama/adapter.py
-./tinyllm/ollama/client.py
 ./tinyllm/pipeline/__init__.py
 ./tinyllm/pipeline/generator.py
 ./tinyllm/pipeline/tokenizer.py
@@ -45,9 +42,6 @@ tinyllm/models/base.py
 tinyllm/models/ffn.py
 tinyllm/models/tiny.py
 tinyllm/models/transformer.py
-tinyllm/ollama/__init__.py
-tinyllm/ollama/adapter.py
-tinyllm/ollama/client.py
 tinyllm/pipeline/__init__.py
 tinyllm/pipeline/generator.py
 tinyllm/pipeline/tokenizer.py

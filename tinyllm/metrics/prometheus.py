@@ -1,16 +1,32 @@
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
 from dataclasses import dataclass
 from typing import Optional
+import os
 
 @dataclass
 class PrometheusConfig:
     port: int = 8001
-    enabled: bool = True
+    enabled: bool = False  # Default to disabled
+    path: str = "/metrics"
+    startup_server: bool = False  # Whether to start the HTTP server internally
 
 class PrometheusMetrics:
     def __init__(self, config: Optional[PrometheusConfig] = None):
+        # Allow environment variables to override config
         self.config = config or PrometheusConfig()
-    
+        
+        # Environment overrides
+        if os.getenv('ENABLE_METRICS'):
+            self.config.enabled = os.getenv('ENABLE_METRICS').lower() == 'true'
+        if os.getenv('METRICS_PORT'):
+            self.config.port = int(os.getenv('METRICS_PORT'))
+        if os.getenv('METRICS_PATH'):
+            self.config.path = os.getenv('METRICS_PATH')
+            
+        if not self.config.enabled:
+            return
+
+        # Initialize metrics collectors
         self.requests_total = Counter(
             'tinyllm_requests_total',
             'Total number of requests',
@@ -45,21 +61,42 @@ class PrometheusMetrics:
             ['device']
         )
 
-        if self.config.enabled:
+        # Only start HTTP server if explicitly requested
+        # (Docker setup will use external Prometheus)
+        if self.config.startup_server:
             start_http_server(self.config.port)
 
     def record_request(self, endpoint: str):
+        if not self.config.enabled:
+            return
         self.requests_total.labels(endpoint=endpoint).inc()
 
     def record_latency(self, endpoint: str, duration: float):
+        if not self.config.enabled:
+            return
         self.request_duration.labels(endpoint=endpoint).observe(duration)
 
     def record_tokens(self, input_count: int, output_count: int):
+        if not self.config.enabled:
+            return
         self.token_throughput.labels(direction="input").inc(input_count)
         self.token_throughput.labels(direction="output").inc(output_count)
 
     def record_error(self, error_type: str):
+        if not self.config.enabled:
+            return
         self.errors_total.labels(error_type=error_type).inc()
 
     def update_gpu_memory(self, device: str, bytes_used: int):
+        if not self.config.enabled:
+            return
         self.gpu_memory_usage.labels(device=device).set(bytes_used)
+
+    @classmethod
+    def create_standalone(cls, port: int = 8001) -> 'PrometheusMetrics':
+        """Create a standalone metrics server instance"""
+        return cls(PrometheusConfig(
+            port=port,
+            enabled=True,
+            startup_server=True
+        ))

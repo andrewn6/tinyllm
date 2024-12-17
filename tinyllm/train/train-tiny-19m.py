@@ -1,11 +1,22 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tinyllm.models.tiny import TinyLLM
 import json
 import os
 from tqdm import tqdm
+import numpy as np
+
+class TextDataset(Dataset):
+    def __init__(self, input_ids):
+        self.input_ids = input_ids
+    
+    def __len__(self):
+        return len(self.input_ids)
+    
+    def __getitem__(self, idx):
+        return torch.tensor(self.input_ids[idx])
 
 def get_device():
     if torch.cuda.is_available():
@@ -17,11 +28,12 @@ def get_device():
 def train_tiny(
     input_file: str = os.path.join(os.path.dirname(__file__), "input.txt"),
     output_dir: str = "checkpoints/tiny",
-    batch_size: int = 32,
-    learning_rate: float = 3e-4,
+    batch_size: int = 128,
+    learning_rate: float = 1e-3,
     num_epochs: int = 10,
     save_every: int = 1000,
-    device: str = get_device()
+    device: str = get_device(),
+    num_workers: int = 4
 ):
     print(f"Using device: {device}")
     
@@ -53,8 +65,25 @@ def train_tiny(
     print(f"Training TinyLLM on {device}")
     print(f"Model size: {sum(p.numel() for p in model.parameters())/1e6:.1f}M parameters")
     
-    train_dataloader = train_data
-    val_dataloader = val_data
+    train_dataset = TextDataset(train_data)
+    val_dataset = TextDataset(val_data)
+    
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True if device == "cuda" else False
+    )
+    
+    val_dataloader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size*2,
+        num_workers=num_workers,
+        pin_memory=True if device == "cuda" else False
+    )
+
+    scaler = torch.cuda.amp.GradScaler() if device == "cuda" else None
     
     global_step = 0
     for epoch in range(num_epochs):
@@ -64,16 +93,25 @@ def train_tiny(
         for batch in progress_bar:
             input_ids = batch.to(device)
             
-            outputs = model(input_ids)
-            loss = criterion(outputs.view(-1, outputs.size(-1)), input_ids.view(-1))
-            
-            optimizer.zero_grad()
-            loss.backward()
-
-            if device == "mps":
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if device == "cuda":
+                with torch.cuda.amp.autocast():
+                    outputs = model(input_ids)
+                    loss = criterion(outputs.view(-1, outputs.size(-1)), input_ids.view(-1))
                 
-            optimizer.step()
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                outputs = model(input_ids)
+                loss = criterion(outputs.view(-1, outputs.size(-1)), input_ids.view(-1))
+                
+                optimizer.zero_grad()
+                loss.backward()
+                if device == "mps":
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
             
             loss_value = loss.detach().cpu().item()
             

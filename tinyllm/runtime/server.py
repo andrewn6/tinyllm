@@ -287,6 +287,10 @@ async def get_stats():
 async def startup():
     """Initialize metrics collection on startup"""
     if metrics.config.enabled:
+        from prometheus_client import start_http_server
+        start_http_server(metrics.config.port)
+        logger.info(f"Started Prometheus metrics server on port {metrics.config.port}")
+        
         async def update_metrics():
             while True:
                 if torch.cuda.is_available():

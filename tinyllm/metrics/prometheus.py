@@ -61,11 +61,6 @@ class PrometheusMetrics:
             ['device']
         )
 
-        # Only start HTTP server if explicitly requested
-        # (Docker setup will use external Prometheus)
-        if self.config.startup_server:
-            start_http_server(self.config.port)
-
     def record_request(self, endpoint: str):
         if not self.config.enabled:
             return

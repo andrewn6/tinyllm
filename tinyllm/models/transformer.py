@@ -10,13 +10,13 @@ from tinyllm.compute.kernels import KernelManager
 class TransformerConfig:
     n_head: int
     hidden_size: int = 2048
-    num_attention_heads: int = 32
     num_layers: int = 32 
     max_sequence_length: int = 2048
     vocab_size: int = 32000
     dropout: float = 0.1
     layer_norm_epsilon: float = 1e-5
     use_cache: bool = True
+    architecture: str = "default"  # Add architecture type to support variants
 
 class TransformerLayer(nn.Module):
     def __init__(
@@ -27,39 +27,64 @@ class TransformerLayer(nn.Module):
         super().__init__()
         self.config = config
 
-        head_dim = config.hidden_size // config.num_attention_heads
+        if config.architecture == "default":
+            head_dim = config.hidden_size // config.n_head
 
-        self.input_proj = nn.Linear(config.hidden_size, config.hidden_size)
-        self.output_proj = nn.Linear(config.hidden_size, config.hidden_size)
+            self.input_proj = nn.Linear(config.hidden_size, config.hidden_size)
+            self.output_proj = nn.Linear(config.hidden_size, config.hidden_size)
 
-        self.input_layernorm = nn.LayerNorm(
-                config.hidden_size,
-                eps=config.layer_norm_epsilon
-        )
+            self.input_layernorm = nn.LayerNorm(
+                    config.hidden_size,
+                    eps=config.layer_norm_epsilon
+            )
 
-        self.post_attention_layernorm = nn.LayerNorm(
-                config.hidden_size,
-                eps=config.layer_norm_epsilon
-        )
+            self.post_attention_layernorm = nn.LayerNorm(
+                    config.hidden_size,
+                    eps=config.layer_norm_epsilon
+            )
 
-        attention_config = AttentionConfig(
-                num_heads=config.num_attention_heads,
-                head_dim=head_dim,
-                dropout=config.dropout,
-                max_seq_length=config.max_sequence_length,
-                use_kv_cache=config.use_cache
-        )
-        self.attention = Attention(attention_config, kernel_manager)
+            attention_config = AttentionConfig(
+                    num_heads=config.n_head,
+                    head_dim=head_dim,
+                    dropout=config.dropout,
+                    max_seq_length=config.max_sequence_length,
+                    use_kv_cache=config.use_cache
+            )
+            self.attention = Attention(attention_config, kernel_manager)
 
-        ffn_config = FFNConfig(
-                hidden_size=config.hidden_size,
-                intermediate_size=config.hidden_size * 4,
-                dropout=config.dropout
-        )
-        self.ffn = FFN(ffn_config)
+            ffn_config = FFNConfig(
+                    hidden_size=config.hidden_size,
+                    intermediate_size=config.hidden_size * 4,
+                    dropout=config.dropout
+            )
+            self.ffn = FFN(ffn_config)
 
+        elif config.architecture == "variant1":
+            self.ln1 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+            self.ln2 = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+            self.attention = nn.ModuleDict({
+                'qkv': nn.Linear(config.hidden_size, 3 * config.hidden_size),
+                'proj': nn.Linear(config.hidden_size, config.hidden_size)
+            })
+            self.mlp = nn.ModuleDict({
+                'fc1': nn.Linear(config.hidden_size, 4 * config.hidden_size),
+                'fc2': nn.Linear(4 * config.hidden_size, config.hidden_size)
+            })
 
     def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        sequence_id: Optional[int] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+        if self.config.architecture == "default":
+            return self._forward_default(input_ids, attention_mask, sequence_id, past_key_values, use_cache)
+        elif self.config.architecture == "variant1":
+            return self._forward_variant1(input_ids, attention_mask, sequence_id, past_key_values, use_cache)
+
+    def _forward_default(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
@@ -92,6 +117,40 @@ class TransformerLayer(nn.Module):
             return hidden_states, present_key_value
         return hidden_states, None
 
+    def _forward_variant1(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        sequence_id: Optional[int] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+        hidden_states = input_ids 
+
+        residual = hidden_states
+        hidden_states = self.ln1(hidden_states)
+
+        attention_output, present_key_value = self.attention(
+                hidden_states,
+                attention_mask=attention_mask,
+                sequence_id=sequence_id,
+                past_key_values=past_key_values,
+                use_cache=use_cache
+        )
+
+        hidden_states = residual + attention_output
+        
+        # feed forward
+        residual = hidden_states
+        hidden_states = self.ln2(hidden_states)
+        hidden_states = self.mlp['fc1'](hidden_states)
+        hidden_states = self.mlp['fc2'](hidden_states)
+        hidden_states = residual + hidden_states
+
+        if use_cache:
+            return hidden_states, present_key_value
+        return hidden_states, None
+
 class Transformer(nn.Module):
     def __init__(
         self,
@@ -101,26 +160,30 @@ class Transformer(nn.Module):
         super().__init__()
         self.config = config
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+        if config.architecture == "default":
+            self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size)
+            self.layers = nn.ModuleList([
+                TransformerLayer(config, kernel_manager) for _ in range(config.num_layers)
+            ])
+            self.final_layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+            self.output_proj = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        
+        elif config.architecture == "variant1":
+            self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
+            self.position_embedding = nn.Embedding(config.max_sequence_length, config.hidden_size)
+            self.layers = nn.ModuleList([
+                TransformerLayer(config, kernel_manager) for _ in range(config.num_layers)
+            ])
+            self.ln_f = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_epsilon)
+            self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-        self.layers = nn.ModuleList([
-            TransformerLayer(config, kernel_manager)
-            for _ in range(config.num_layers)
-        ])
+    def forward(self, input_ids, attention_mask=None, **kwargs):
+        if self.config.architecture == "default":
+            return self._forward_default(input_ids, attention_mask, **kwargs)
+        elif self.config.architecture == "variant1":
+            return self._forward_variant1(input_ids, attention_mask, **kwargs)
 
-        self.final_layernorm = nn.LayerNorm(
-            config.hidden_size,
-            eps=config.layer_norm_epsilon
-        )
-
-        self.output_proj = nn.Linear(
-            config.hidden_size,
-            config.vocab_size,
-            bias=False
-        )
-
-
-    def forward(
+    def _forward_default(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,

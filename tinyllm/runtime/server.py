@@ -103,33 +103,24 @@ def initialize_generator():
             if not model_info:
                 raise ValueError(f"Model {model_name} not found")
 
-            model_config_dict = model_info.config.copy()
-            
-            name_mappings = {
-                'num_heads': 'n_head',
-                'max_seq_length': 'max_sequence_length',
-                'layer_norm_eps': 'layer_norm_epsilon',  
-                'num_hidden_layers': 'num_layers',      
-                'num_attention_heads': 'n_head'       
+            config_mapping = {
+                "hidden_size": "hidden_size",
+                "num_heads": "n_head", 
+                "num_layers": "num_layers",
+                "vocab_size": "vocab_size",
+                "max_seq_length": "max_sequence_length", 
+                "dropout": "dropout",
+                "layer_norm_eps": "layer_norm_epsilon", 
             }
             
-            # Convert known parameter names
-            for old_name, new_name in name_mappings.items():
-                if old_name in model_config_dict:
-                    model_config_dict[new_name] = model_config_dict.pop(old_name)
+            transformed_config = {}
+            for json_key, config_key in config_mapping.items():
+                if json_key in model_info.config:
+                    transformed_config[config_key] = model_info.config[json_key]
             
-            params_to_remove = [
-                'head_dim',
-                'intermediate_size',
-                'hidden_act',
-                'position_embedding_type',
-                'initializer_range'
-            ]
+            transformed_config["architecture"] = "variant1"
             
-            for param in params_to_remove:
-                model_config_dict.pop(param, None)
-                
-            model_config = TransformerConfig(**model_config_dict)
+            model_config = TransformerConfig(**transformed_config)
             model = Transformer(model_config)
             
             if model_info.checkpoint_path:

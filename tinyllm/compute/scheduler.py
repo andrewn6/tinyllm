@@ -96,7 +96,7 @@ class Scheduler:
             self,
             batch_config: Optional[BatchConfig] = None,
             device: Optional[torch.device] = None,
-            num_workers: int =4
+            num_workers: int = 4
     ):
         self.device = device if device is not None else get_best_device()
         self.batch_config = batch_config or BatchConfig()
@@ -121,7 +121,7 @@ class Scheduler:
             self.stream = None
 
         self.running = True
-        self.scheduler_thread = threading.Thread(target=self._schedule_loop)
+        self.scheduler_thread = threading.Thread(target=self._scheduler_loop)
         self.scheduler_thread.daemon = True
         self.scheduler_thread.start()
 
@@ -247,7 +247,7 @@ class Scheduler:
         print(f"Operation {operation.id} failed: {error}")
 
     def _check_memory_pressure(self):
-        if self.memory_Tracker.should_reduce_batch():
+        if self.memory_tracker.should_reduce_batch():
             self.batch_config.current_max_batch = max(\
                     1,
                     self.batch_config.current_max_batch // 2

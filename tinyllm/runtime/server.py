@@ -51,18 +51,30 @@ class GenerationResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting TinyLLM server...")
+    logger.info("starting tinyllm server...")
     app.state.device = torch.device(
         "cuda" if torch.cuda.is_available() else
         "mps" if torch.backends.mps.is_available() else "cpu"
     )
     logger.info(f"Using device: {app.state.device}")
+
+    app.state.scheduler = Scheduler(
+        batch_config=BatchConfig(
+            max_batch_size=32,
+            max_sequence_length=128,
+            dynamic_batching=True
+        ),
+        device=app.state.device
+    )
+    logger.info(f"initialized scheduler with device: {app.state.device}")
+
     yield
+
     if hasattr(app.state, "generator"):
         del app.state.generator
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-    logger.info("Shutting down TinyLLM server...")
+    logger.info("shutting down tinyllm server...")
 
 app = FastAPI(
     title="TinyLLM",
@@ -90,9 +102,34 @@ def initialize_generator():
             
             if not model_info:
                 raise ValueError(f"Model {model_name} not found")
+
+            model_config_dict = model_info.config.copy()
             
-            # Load model from registry
-            model_config = TransformerConfig(**model_info.config)
+            name_mappings = {
+                'num_heads': 'n_head',
+                'max_seq_length': 'max_sequence_length',
+                'layer_norm_eps': 'layer_norm_epsilon',  
+                'num_hidden_layers': 'num_layers',      
+                'num_attention_heads': 'n_head'       
+            }
+            
+            # Convert known parameter names
+            for old_name, new_name in name_mappings.items():
+                if old_name in model_config_dict:
+                    model_config_dict[new_name] = model_config_dict.pop(old_name)
+            
+            params_to_remove = [
+                'head_dim',
+                'intermediate_size',
+                'hidden_act',
+                'position_embedding_type',
+                'initializer_range'
+            ]
+            
+            for param in params_to_remove:
+                model_config_dict.pop(param, None)
+                
+            model_config = TransformerConfig(**model_config_dict)
             model = Transformer(model_config)
             
             if model_info.checkpoint_path:
@@ -160,6 +197,7 @@ async def generate(request: GenerationRequest):
     request_start = time.time()
 
     try:
+    
         config = GenerationConfig(
             max_new_tokens=request.max_new_tokens,
             temperature=request.temperature,
@@ -169,12 +207,18 @@ async def generate(request: GenerationRequest):
         )
 
         if request.stream:
-            # Record streaming request
             metrics.record_request("generate_stream")
             return StreamingResponse(
                 app.state.generator.stream(request.prompt, config),
                 media_type='text/event-stream'
             )
+
+        operation_id = app.state.scheduler.schedule_operation(
+            op_type=OperationType.GENERATION,
+            callback=lambda data: app.state.generator(request.prompt, config),
+            data={"prompt": request.prompt, "config": config}
+        )
+        logger.info(f"Operation scheduled with ID: {operation_id}")
 
         # Generate text
         output = app.state.generator(request.prompt, config)
@@ -210,6 +254,14 @@ async def generate(request: GenerationRequest):
 @app.post("/generate_batch")
 async def generate_batch(request: BatchGenerationRequest):
     initialize_generator()
+
+    config = GenerationConfig(
+            max_new_tokens=request.max_new_tokens,
+            temperature=request.temperature,
+            top_k=request.top_k,
+            top_p=request.top_p,
+            do_sample=request.do_sample
+    )
     
     # Record batch request metrics
     metrics.record_request("generate_batch")
@@ -217,14 +269,6 @@ async def generate_batch(request: BatchGenerationRequest):
     request_start = time.time()
 
     try:
-        config = GenerationConfig(
-            max_new_tokens=request.max_new_tokens,
-            temperature=request.temperature,
-            top_k=request.top_k,
-            top_p=request.top_p,
-            do_sample=request.do_sample
-        )
-        
         outputs = app.state.generator(request.prompts, config)
         time_taken = time.time() - request_start
         
@@ -287,6 +331,8 @@ async def get_stats():
 
 @app.on_event("startup")
 async def startup():
+    logger.info("Starting TinyLLM server with memory-aware scheduling")
+    
     if metrics.config.enabled:
         from prometheus_client import start_http_server
         start_http_server(metrics.config.port)
@@ -320,6 +366,10 @@ async def startup():
     logger.info(f"Loading model {model_name} from {model_info.checkpoint_path}")
 
     """Initialize model components"""
+    model_config_dict = model_info.config.copy()
+    if 'num_heads' in model_config_dict:
+        model_config_dict['n_head'] = model_config_dict.pop('num_heads')
+
     model_config = TransformerConfig(**model_info.config)
     model = Transformer(model_config)
     model.load_state_dict(torch.load(model_info.checkpoint_path, map_location=app.state.device))
@@ -354,6 +404,9 @@ async def startup():
                 await asyncio.sleep(15)
                 
         asyncio.create_task(update_metrics())
+
+    logger.info(f"Initialized scheduler with device: {app.state.device}")
+    logger.info(f"Memory tracker status: {app.state.scheduler.memory_tracker.get_memory_pressure():.2f}")
 
 
 if __name__ == "__main__":

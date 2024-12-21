@@ -1,6 +1,6 @@
 from pathlib import Path 
 from typing import Dict, Optional, Union, List, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json 
 import os
@@ -14,7 +14,13 @@ class ModelInfo:
     checkpoint_path: str
     config_path: str
     description: str = ""
-    metrics_config: Optional[Dict[str, Any]] = None
+    metrics_config: Dict = field(default_factory=dict)
+
+    @property
+    def config(self) -> Dict:
+        """Load config from file"""
+        with open(self.config_path) as f:
+            return json.load(f)
 
 class ModelRegistry:
     def __init__(self):

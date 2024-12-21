@@ -1,4 +1,5 @@
 from prometheus_client import Counter, Histogram, Gauge
+from ..pipeline.generator import TextGenerator
 from dataclasses import dataclass
 from typing import Optional
 import os
@@ -9,7 +10,7 @@ class PrometheusConfig:
     port: int = 8001
     enabled: bool = False  # Default to disabled
     path: str = "/metrics"
-    startup_server: bool = False  # Whether to start the HTTP server internally
+    startup_server: bool = False  # Whether to start the HTTP server intrnally
 
 class PrometheusMetrics:
     def __init__(self, config: Optional[PrometheusConfig] = None):

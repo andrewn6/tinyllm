@@ -8,6 +8,7 @@ from tinyllm.compute.kernels import KernelManager
 
 @dataclass
 class TransformerConfig:
+    n_head: int
     hidden_size: int = 2048
     num_attention_heads: int = 32
     num_layers: int = 32 

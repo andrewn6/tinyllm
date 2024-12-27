@@ -16,7 +16,7 @@ class TextDataset(Dataset):
         return len(self.input_ids)
     
     def __getitem__(self, idx):
-        return torch.tensor(self.input_ids[idx])
+        return self.input_ids[idx].clone().detach()
 
 def get_device():
     if torch.cuda.is_available():
@@ -90,12 +90,13 @@ def train_tiny(
         model.train()
         progress_bar = tqdm(train_dataloader, desc=f"Epoch {epoch}")
         
-        for batch in progress_bar:
-            input_ids = batch.to(device)
+        for batch_idx, input_ids in enumerate(progress_bar):
+            input_ids = input_ids.to(device)
+            optimizer.zero_grad()
             
             if device == "cuda":
                 with torch.cuda.amp.autocast():
-                    outputs = model(input_ids)
+                    outputs, _ = model(input_ids)
                     loss = criterion(outputs.view(-1, outputs.size(-1)), input_ids.view(-1))
                 
                 scaler.scale(loss).backward()
@@ -104,7 +105,7 @@ def train_tiny(
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                outputs = model(input_ids)
+                outputs, _ = model(input_ids)
                 loss = criterion(outputs.view(-1, outputs.size(-1)), input_ids.view(-1))
                 
                 optimizer.zero_grad()
@@ -135,9 +136,9 @@ def train_tiny(
         model.eval()
         val_loss = 0
         with torch.no_grad():
-            for batch in val_dataloader:
-                input_ids = batch.to(device)
-                outputs = model(input_ids)
+            for input_ids in val_dataloader:
+                input_ids = input_ids.to(device)
+                outputs, _ = model(input_ids)
                 val_loss += criterion(
                     outputs.view(-1, outputs.size(-1)), 
                     input_ids.view(-1)

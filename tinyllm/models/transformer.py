@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from .attention import Attention, AttentionConfig
 from .ffn import FFN, FFNConfig
+import torch.nn.functional as F
 from typing import Tuple, Optional, List
 from dataclasses import dataclass
 from tinyllm.compute.kernels import KernelManager
@@ -119,36 +120,52 @@ class TransformerLayer(nn.Module):
 
     def _forward_variant1(
         self,
-        input_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         sequence_id: Optional[int] = None,
-        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        past_key_values: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         use_cache: bool = False
-    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
-        hidden_states = input_ids 
-
+    ) -> Tuple[torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         residual = hidden_states
         hidden_states = self.ln1(hidden_states)
-
-        attention_output, present_key_value = self.attention(
-                hidden_states,
-                attention_mask=attention_mask,
-                sequence_id=sequence_id,
-                past_key_values=past_key_values,
-                use_cache=use_cache
-        )
-
-        hidden_states = residual + attention_output
         
-        # feed forward
+        qkv = self.attention['qkv'](hidden_states)
+        batch_size, seq_len, _ = qkv.shape
+        qkv = qkv.reshape(batch_size, seq_len, 3, self.config.n_head, -1).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]
+
+        if past_key_values is not None:
+            past_k, past_v = past_key_values
+            k = torch.cat([past_k, k], dim=2)
+            v = torch.cat([past_v, v], dim=2)
+
+        if attention_mask is not None:
+            attention_mask = attention_mask.unsqueeze(1)
+            attention_mask = attention_mask.to(dtype=q.dtype)
+            if sequence_id is not None:
+                seq_mask = attention_mask.new_ones(attention_mask.size()) * float('-inf')
+                seq_mask[:, :, :, :seq_len] = attention_mask
+                attention_mask = seq_mask
+        
+        attn_output = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=attention_mask,
+            dropout_p=self.config.dropout if self.training else 0.0
+        )
+        
+        attn_output = attn_output.transpose(1, 2).contiguous().view(batch_size, seq_len, -1)
+        hidden_states = self.attention['proj'](attn_output)
+        hidden_states = residual + hidden_states
+        
         residual = hidden_states
         hidden_states = self.ln2(hidden_states)
         hidden_states = self.mlp['fc1'](hidden_states)
+        hidden_states = F.gelu(hidden_states)
         hidden_states = self.mlp['fc2'](hidden_states)
         hidden_states = residual + hidden_states
 
         if use_cache:
-            return hidden_states, present_key_value
+            return hidden_states, (k, v)
         return hidden_states, None
 
 class Transformer(nn.Module):
@@ -220,3 +237,39 @@ class Transformer(nn.Module):
     def clear_cache(self, sequence_id: Optional[int] = None):
         for layer in self.layers:
             layer.attention.clear_cache(sequence_id)
+
+    def _forward_variant1(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        sequence_id: Optional[int] = None,
+        past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
+        use_cache: bool = False
+    ) -> Tuple[torch.Tensor, Optional[List[Tuple[torch.Tensor, torch.Tensor]]]]:
+        hidden_states = self.embedding(input_ids)
+        
+        position_ids = torch.arange(input_ids.size(1), device=input_ids.device)
+        hidden_states = hidden_states + self.position_embedding(position_ids)
+
+        if past_key_values is None:
+            past_key_values = [None] * len(self.layers)
+
+        present_key_values = [] if use_cache else None
+        for i, layer in enumerate(self.layers):
+            layer_past = past_key_values[i] if past_key_values is not None else None
+
+            hidden_states, present_key_value = layer(
+                hidden_states,
+                attention_mask=attention_mask,
+                sequence_id=sequence_id,
+                past_key_values=layer_past,
+                use_cache=use_cache
+            )
+
+            if use_cache:
+                present_key_values.append(present_key_value)
+
+        hidden_states = self.ln_f(hidden_states)
+        logits = self.lm_head(hidden_states)
+
+        return logits, present_key_values

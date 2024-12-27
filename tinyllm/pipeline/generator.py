@@ -154,26 +154,24 @@ class TextGenerator:
 
         for _ in range(config.max_new_tokens):
             logits, past_key_values = self.model(
-                input_ids[:, -1:] if past_key_values is not None else input_ids,
+                input_ids=input_ids[:, -1:] if past_key_values is not None else input_ids,
                 attention_mask=attention_mask,
-                past_key_values=past_key_values,
-                sequence_id=sequence_id,
-                use_cache=config.use_cache
+                past_key_values=past_key_values
             )
 
             next_tokens = self._sample_token(logits[:, -1, :], config)
-
+            next_tokens = next_tokens.unsqueeze(-1)
             
-            all_token_ids = torch.cat([all_token_ids, next_tokens], dim=-1)
+            all_token_ids = torch.cat([all_token_ids, next_tokens], dim=1)
             attention_mask = torch.cat([
                 attention_mask,
                 torch.ones((batch_size, 1), device=self.device)
-            ], dim=-1)
+            ], dim=1)
+            
+            input_ids = next_tokens
 
             if (next_tokens == self.tokenizer.config.eos_token_id).all():
                 break
-
-        self.model.clear_cache(sequence_id)
 
         return all_token_ids
     

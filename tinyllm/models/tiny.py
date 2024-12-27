@@ -5,7 +5,6 @@ from tinyllm.models.base import BaseLLM, ModelConfig
 from tinyllm.pipeline.tokenizer import Tokenizer, TokenizerConfig
 
 class TinyLLM(BaseLLM):
-    """Tiny model for testing - 8M params"""
     def __init__(self):
         config = ModelConfig(
             hidden_size=512,
@@ -17,14 +16,12 @@ class TinyLLM(BaseLLM):
         )
         super().__init__(config)
         
-        # Initialize tokenizer explicitly
         tokenizer_config = TokenizerConfig(
             vocab_size=config.vocab_size,
             max_sequence_length=config.max_seq_length
         )
         self.tokenizer = Tokenizer(tokenizer_config)
         
-        # Model layers
         self.embedding = nn.Embedding(config.vocab_size, config.hidden_size)
         self.position_embedding = nn.Embedding(config.max_seq_length, config.hidden_size)
         self.layers = nn.ModuleList([
@@ -39,37 +36,36 @@ class TinyLLM(BaseLLM):
         attention_mask: Optional[torch.Tensor] = None,
         past_key_values: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None,
         **kwargs: Any
-    ) -> torch.Tensor:
-        # Ensure input_ids is 2D
+    ) -> Tuple[torch.Tensor, List[Tuple[torch.Tensor, torch.Tensor]]]:
         if input_ids.dim() == 1:
-            input_ids = input_ids.unsqueeze(0)  # Add batch dimension
+            input_ids = input_ids.unsqueeze(0)
         
-        # Get sequence length from reshaped input
+        if attention_mask is not None and attention_mask.dim() == 2:
+            attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        
         seq_length = input_ids.size(-1)
         
-        # Embed tokens
         hidden_states = self.embedding(input_ids)
         
-        # Add positional embeddings
         position_ids = torch.arange(seq_length, device=input_ids.device).unsqueeze(0)
         hidden_states = hidden_states + self.position_embedding(position_ids)
-        
-        # Process through transformer layers
+
         past_key_values = past_key_values or [None] * self.config.num_layers
+        present_key_values = []
+        
         for i, layer in enumerate(self.layers):
             hidden_states, past_kv = layer(
                 hidden_states,
                 attention_mask=attention_mask,
                 past_key_value=past_key_values[i]
             )
+            present_key_values.append(past_kv)
         
-        # Final layer norm
         hidden_states = self.ln_f(hidden_states)
         
-        # Project to vocabulary
         logits = self.lm_head(hidden_states)
         
-        return logits
+        return logits, present_key_values
 
 class TransformerLayer(nn.Module):
     def __init__(self, config: ModelConfig):
@@ -85,7 +81,6 @@ class TransformerLayer(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        # Self attention
         attn_out, past_kv = self.attention(
             self.ln1(x),
             attention_mask=attention_mask,
@@ -93,7 +88,6 @@ class TransformerLayer(nn.Module):
         )
         x = x + attn_out
         
-        # MLP
         x = x + self.mlp(self.ln2(x))
         return x, past_kv
 
@@ -102,37 +96,40 @@ class SelfAttention(nn.Module):
         super().__init__()
         self.num_heads = config.num_heads
         self.head_dim = config.head_dim or (config.hidden_size // config.num_heads)
-        self.qkv = nn.Linear(config.hidden_size, 3 * self.num_heads * self.head_dim)
-        self.proj = nn.Linear(self.num_heads * self.head_dim, config.hidden_size)
+        self.hidden_size = config.hidden_size
+        
+        self.q = nn.Linear(config.hidden_size, config.hidden_size)
+        self.k = nn.Linear(config.hidden_size, config.hidden_size)
+        self.v = nn.Linear(config.hidden_size, config.hidden_size)
+        self.proj = nn.Linear(config.hidden_size, config.hidden_size)
         
     def forward(
-        self,
+        self, 
         x: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         B, L, _ = x.shape
         
-        # QKV projection
-        qkv = self.qkv(x).chunk(3, dim=-1)
-        q, k, v = map(
-            lambda t: t.view(B, L, self.num_heads, self.head_dim).transpose(1, 2),
-            qkv
-        )
+        q = self.q(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.v(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # Use past key values if provided
+        kv_seq_len = L
         if past_key_value is not None:
             past_k, past_v = past_key_value
             k = torch.cat([past_k, k], dim=2)
             v = torch.cat([past_v, v], dim=2)
+            kv_seq_len = k.size(-2)
             
-        # Attention
         attn = (q @ k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        
         if attention_mask is not None:
-            attn = attn.masked_fill(attention_mask[:, None, None, :] == 0, float('-inf'))
+            expanded_mask = attention_mask.unsqueeze(1).expand(B, 1, L, kv_seq_len)
+            attn = attn.masked_fill(expanded_mask == 0, float('-inf'))
+            
         attn = torch.softmax(attn, dim=-1)
         
-        # Output
         out = (attn @ v).transpose(1, 2).reshape(B, L, -1)
         out = self.proj(out)
         

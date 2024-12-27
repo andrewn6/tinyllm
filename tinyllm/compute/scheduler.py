@@ -25,7 +25,7 @@ class ScheduledOperation:
     data: Any = None
 
     def __post_init__(self):
-        self.id = f"{self.op_type.value}_{time.time.ns()}"
+        self.id = f"{self.op_type.value}_{time.time_ns()}"
 
 class BatchConfig:
     def __init__(
